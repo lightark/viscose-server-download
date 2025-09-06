@@ -1,4 +1,4 @@
-name: Download VS Code Server (robust)
+name: Download VS Code Server (stable x64)
 
 on:
   workflow_dispatch: {}
@@ -11,72 +11,43 @@ jobs:
         run: |
           set -euo pipefail
           COMMIT="6f17636121051a53c88d3e605c491d22af2ba755"
+          PLATFORM="server-linux-x64"
+          CHANNEL="stable"
+          URL_MS="https://update.code.visualstudio.com/commit:${COMMIT}/${PLATFORM}/${CHANNEL}"
+          URL_CDN="https://az764295.vo.msecnd.net/stable/${COMMIT}/vscode-server-linux-x64.tar.gz"
           echo "COMMIT=$COMMIT" >> $GITHUB_ENV
-          # 4 条常见可用地址（按顺序尝试）
-          echo "URL_1=https://update.code.visualstudio.com/commit:${COMMIT}/server-linux-x64/stable" >> $GITHUB_ENV
-          echo "URL_2=https://az764295.vo.msecnd.net/stable/${COMMIT}/vscode-server-linux-x64.tar.gz" >> $GITHUB_ENV
-          echo "URL_3=https://az764295.vo.msecnd.net/stable/${COMMIT}/linux-x64/server/vscode-server-linux-x64.tar.gz" >> $GITHUB_ENV
-          echo "URL_4=https://az764295.vo.msecnd.net/stable/${COMMIT}/vscode-server-linux-x64/web/vscode-server-linux-x64.tar.gz" >> $GITHUB_ENV
+          echo "URL_MS=$URL_MS"   >> $GITHUB_ENV
+          echo "URL_CDN=$URL_CDN" >> $GITHUB_ENV
 
-      - name: Try multiple sources (verbose)
-        id: fetch
+      - name: Download (verbose)
         run: |
           set -euo pipefail
-          for i in 1 2 3 4; do
-            url_var="URL_${i}"
-            url="${!url_var}"
-            echo ">>> Trying $url"
-            rm -f pkg
-            if curl -L --retry 3 --retry-delay 2 -v "$url" -o pkg ; then
-              # 判定压缩类型并列目录前 40 行
-              file pkg || true
-              if file pkg | grep -qi gzip; then
-                echo "Archive looks like gzip (.tar.gz)"
-                tar -tzf pkg | sed -n '1,40p' || true
-                if tar -tzf pkg | grep -Eq '/server\.sh$'; then
-                  mv pkg vscode-server-linux-x64.tar.gz
-                  echo "ok=true" >> $GITHUB_OUTPUT
-                  echo "source=$url" >> $GITHUB_OUTPUT
-                  exit 0
-                fi
-              else
-                echo "Archive looks like plain tar"
-                tar -tf pkg | sed -n '1,40p' || true
-                if tar -tf pkg | grep -Eq '/server\.sh$'; then
-                  mv pkg vscode-server-linux-x64.tar.gz
-                  echo "ok=true" >> $GITHUB_OUTPUT
-                  echo "source=$url" >> $GITHUB_OUTPUT
-                  exit 0
-                fi
-              fi
-            fi
-          done
-          # 都没找到 server.sh，也先保存现有文件供调试
-          mv pkg vscode-server-LATEST.tar.any || true
-          echo "ok=false" >> $GITHUB_OUTPUT
+          echo "Primary: $URL_MS"
+          curl -L --retry 3 --retry-delay 2 -v "$URL_MS" -o pkg || echo PRIMARY_FAIL > .status
+          if [ -f .status ]; then
+            echo "Fallback: $URL_CDN"
+            curl -L --retry 3 --retry-delay 2 -v "$URL_CDN" -o pkg
+          fi
 
-      - name: Show final file info
+      - name: Show file info
         run: |
-          ls -lh || true
-          [ -f vscode-server-linux-x64.tar.gz ] && file vscode-server-linux-x64.tar.gz || true
-          [ -f vscode-server-LATEST.tar.any ] && file vscode-server-LATEST.tar.any || true
+          ls -lh pkg
+          file pkg || true
 
-      - name: Upload artifact (whatever we got)
+      - name: Verify contains server.sh
+        run: |
+          if file pkg | grep -qi gzip; then
+            LIST="tar -tzf pkg"
+          else
+            LIST="tar -tf pkg"
+          fi
+          $LIST | sed -n '1,40p' || true
+          $LIST | grep -q '/server\.sh$' || { echo "ERROR: no server.sh"; exit 1; }
+          mv pkg vscode-server-linux-x64.tar.gz
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vscode-server-artifacts
-          path: |
-            vscode-server-linux-x64.tar.gz
-            vscode-server-LATEST.tar.any
-          if-no-files-found: ignore
+          name: vscode-server-linux-x64
+          path: vscode-server-linux-x64.tar.gz
           retention-days: 7
-
-      - name: Fail if server.sh not found
-        if: steps.fetch.outputs.ok != 'true'
-        run: |
-          echo "❌ No source returned an archive containing server.sh"
-          exit 1
-
-      - name: Print success source
-        if: steps.fetch.outputs.ok == 'true'
-        run: echo "✅ Downloaded from: ${{ steps.fetch.outputs.source }}"
