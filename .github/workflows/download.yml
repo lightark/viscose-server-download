@@ -1,0 +1,38 @@
+name: Download VS Code Server
+
+on:
+  workflow_dispatch: {}   # 手动触发
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare
+        run: |
+          set -euo pipefail
+          COMMIT="6f17636121051a53c88d3e605c491d22af2ba755"
+          PLATFORM="server-linux-x64"
+          CHANNEL="stable"
+          echo "COMMIT=$COMMIT" >> $GITHUB_ENV
+          echo "URL=https://update.code.visualstudio.com/commit:${COMMIT}/${PLATFORM}/${CHANNEL}" >> $GITHUB_ENV
+
+      - name: Download from Microsoft CDN
+        run: |
+          curl -L --retry 5 --retry-delay 2 "$URL" -o vscode-server-linux-x64.tar.gz
+          ls -lh vscode-server-linux-x64.tar.gz
+
+      - name: Verify package contains server.sh
+        run: |
+          if tar -tzf vscode-server-linux-x64.tar.gz | grep -q '/server\.sh$'; then
+            echo "✅ OK: server.sh found."
+          else
+            echo "❌ ERROR: server.sh not found in archive."
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-server-linux-x64
+          path: vscode-server-linux-x64.tar.gz
+          retention-days: 7
