@@ -1,4 +1,4 @@
-name: Download VS Code Server
+name: Download VS Code Server (stable x64)
 
 on:
   workflow_dispatch: {}   # 手动触发
@@ -7,26 +7,43 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare
+      - name: Set variables
         run: |
           set -euo pipefail
           COMMIT="6f17636121051a53c88d3e605c491d22af2ba755"
           PLATFORM="server-linux-x64"
           CHANNEL="stable"
+          URL_MS="https://update.code.visualstudio.com/commit:${COMMIT}/${PLATFORM}/${CHANNEL}"
+          URL_CDN="https://az764295.vo.msecnd.net/${CHANNEL}/${COMMIT}/vscode-server-linux-x64.tar.gz"
           echo "COMMIT=$COMMIT" >> $GITHUB_ENV
-          echo "URL=https://update.code.visualstudio.com/commit:${COMMIT}/${PLATFORM}/${CHANNEL}" >> $GITHUB_ENV
+          echo "URL_MS=$URL_MS"   >> $GITHUB_ENV
+          echo "URL_CDN=$URL_CDN" >> $GITHUB_ENV
 
-      - name: Download from Microsoft CDN
+      - name: Download from Microsoft (verbose)
         run: |
-          curl -L --retry 5 --retry-delay 2 "$URL" -o vscode-server-linux-x64.tar.gz
+          set -euo pipefail
+          echo "Primary: $URL_MS"
+          curl -L --retry 3 --retry-delay 2 -v "$URL_MS" -o vscode-server-linux-x64.tar.gz || echo "PRIMARY_FAILED" > .dl_status
+
+      - name: Fallback to Azure CDN if needed (verbose)
+        if: hashFiles('.dl_status') != ''
+        run: |
+          set -euo pipefail
+          echo "Fallback: $URL_CDN"
+          curl -L --retry 3 --retry-delay 2 -v "$URL_CDN" -o vscode-server-linux-x64.tar.gz
+
+      - name: Show file info
+        run: |
           ls -lh vscode-server-linux-x64.tar.gz
+          file vscode-server-linux-x64.tar.gz || true
 
       - name: Verify package contains server.sh
         run: |
           if tar -tzf vscode-server-linux-x64.tar.gz | grep -q '/server\.sh$'; then
-            echo "✅ OK: server.sh found."
+            echo "OK: server.sh found."
           else
-            echo "❌ ERROR: server.sh not found in archive."
+            echo "ERROR: server.sh not found in archive."
+            echo "If this fails, re-run or check network to Microsoft CDN."
             exit 1
           fi
 
